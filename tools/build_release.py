@@ -26,6 +26,13 @@ def resource_files():
             raise ValueError("Animation frame count mismatch")
         paths += [Path("assets") / clip["dir"] / frame for frame in clip["frameFiles"]]
     paths += [Path("assets/eyes") / name for name in ("backing.png", "pupil.png", "geometry.json")]
+    skins_root = ROOT / "assets/skins"
+    if skins_root.is_dir():
+        for skin_manifest in sorted(skins_root.glob("*/manifest.json")):
+            skin = json.loads(skin_manifest.read_text(encoding="utf-8"))
+            paths.append(skin_manifest.relative_to(ROOT))
+            for clip in skin["clips"]:
+                paths += sorted((skin_manifest.parent).glob("f*.webp"))
     audio = json.loads((ROOT / "media_map.json").read_text(encoding="utf-8"))
     if set(audio["clips"]) != {"laugh"}:
         raise ValueError("Unexpected audio clip")

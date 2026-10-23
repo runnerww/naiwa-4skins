@@ -447,10 +447,10 @@ class PetGroup:
     def spawn(self, source=None, point=None, *, scale=CLONE_SCALE, emitted=False, direction=1):
         if self.closed or self.reunifying or len(self.pets) + len(getattr(self, "pending_bursts", [])) >= MAX_PETS:
             return None
-        from pet_app import PetApp, log
+        from pet_app import PetApp, log, SKIN_CHOICES
         pet = PetApp.__new__(PetApp)
         try:
-            pet.__init__(group=self, scale=scale)
+            pet.__init__(group=self, scale=scale, skin=random.choice(SKIN_CHOICES))
             box = pet.visible_box()
             if source is not None:
                 sx, sy = source.root.winfo_x(), source.root.winfo_y()

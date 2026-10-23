@@ -5,7 +5,7 @@ import json
 import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 from pet_paths import ROOT
 
@@ -94,5 +94,60 @@ class EyeFollow:
         patch = patch.resize((self.roi[2] - self.roi[0], self.roi[3] - self.roi[1]), Image.Resampling.LANCZOS)
         result = rgba.copy()
         result.alpha_composite(patch, (self.roi[0], self.roi[1]))
+        result.putalpha(rgba.getchannel("A"))
+        return result
+
+
+class EyeShift:
+    """整块眼睛贴片的轻微平移，供没有独立瞳孔素材的新皮肤使用。"""
+
+    INTERVAL = 1 / 30
+    SMOOTH_SEC = 0.120
+    REFERENCE = (320, 305)
+
+    def __init__(self, size, box, limit=1.8):
+        self.size = tuple(size)
+        self.sx = self.size[0] / self.REFERENCE[0]
+        self.sy = self.size[1] / self.REFERENCE[1]
+        self.roi = (round(box[0] * self.sx), round(box[1] * self.sy),
+                    round((box[0] + box[2]) * self.sx), round((box[1] + box[3]) * self.sy))
+        self.limit = (limit, max(1.0, limit * 0.7))
+        self.center = ((self.roi[0] + self.roi[2]) / 2, (self.roi[1] + self.roi[3]) / 2)
+        self.position = (0.0, 0.0)
+        self.last_update = None
+        self._mask = self._build_mask()
+
+    def _build_mask(self):
+        w, h = self.roi[2] - self.roi[0], self.roi[3] - self.roi[1]
+        scale = 4
+        mask = Image.new("L", (w * scale, h * scale))
+        ImageDraw.Draw(mask).ellipse((0, 0, w * scale - 1, h * scale - 1), fill=255)
+        mask = mask.resize((w, h), Image.Resampling.LANCZOS).filter(ImageFilter.GaussianBlur(max(1, min(w, h) / 12)))
+        return mask
+
+    def reset(self):
+        self.position = (0.0, 0.0)
+        self.last_update = None
+
+    def advance(self, point, now):
+        dx = point[0] - self.center[0]
+        dy = point[1] - self.center[1]
+        distance = math.hypot(dx, dy)
+        factor = math.tanh(distance / max(40.0, self.size[0] * 0.6)) / distance if distance > 1e-9 else 0.0
+        target = (self.limit[0] * dx * factor, self.limit[1] * dy * factor)
+        dt = self.INTERVAL if self.last_update is None else max(0, min(0.25, now - self.last_update))
+        self.last_update = now
+        blend = 1 - math.exp(-dt / self.SMOOTH_SEC)
+        before = self.position
+        self.position = tuple(b if abs(b - a) < 0.005 else a + (b - a) * blend
+                              for a, b in zip(before, target))
+        return max(abs(a - b) for a, b in zip(before, self.position)) > 1e-6
+
+    def render_rgba(self, rgba):
+        patch = rgba.crop(self.roi)
+        patch.putalpha(self._mask)
+        result = rgba.copy()
+        result.alpha_composite(patch, (round(self.roi[0] + self.position[0]),
+                                       round(self.roi[1] + self.position[1])))
         result.putalpha(rgba.getchannel("A"))
         return result

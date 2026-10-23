@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "generator": "jiasidia/naiwa skin overlay",
+  "fps": 30.0,
+  "idleClip": "laugh",
+  "idleFrame": 1,
+  "canvas": {"w": 1648, "h": 1474},
+  "globalScale": 1.0,
+  "clips": [
+    {
+      "id": "laugh",
+      "label": "捧腹大笑",
+      "dir": "skins/king",
+      "frames": 432,
+      "window": {"store": {"w": 320, "h": 305}}
+    }
+  ],
+  "eyeShift": {"box": [130, 35, 70, 35], "limit": 1.8}
+}

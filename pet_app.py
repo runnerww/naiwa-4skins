@@ -35,7 +35,7 @@ from pathlib import Path
 
 from PIL import Image, ImageTk
 from pet_audio import AudioPlayer
-from pet_eyes import EyeFollow
+from pet_eyes import EyeFollow, EyeShift
 from pet_group import (PetGroup, PetVoice, FrameCacheView, MAX_PETS,
                        work_area, constrain_origin, place_window)
 from pet_physics import TIERS, snap_scale, tier_of
@@ -43,6 +43,8 @@ from pet_physics import TIERS, snap_scale, tier_of
 from pet_paths import ROOT, DATA_ROOT
 MANIFEST = ROOT / "assets" / "manifest.json"
 SETTINGS = DATA_ROOT / "pet_settings.json"
+SKINS_DIR = ROOT / "assets" / "skins"
+SKIN_CHOICES = ("default", "shangxin", "king", "xizhuang")
 
 CHROMA = (255, 0, 255)
 CHROMA_HEX = "#ff00ff"
@@ -504,13 +506,18 @@ class _BodyJelly:
 
 
 class Clip:
-    def __init__(self, meta: dict, assets: Path, scale: float):
+    def __init__(self, meta: dict, assets: Path, scale: float, skin: str | None = None):
         self.id = meta["id"]
         self.label = meta["label"]
         self.frames = int(meta["frames"])
         self.dir = meta["dir"]
+        self.skin = skin if skin is not None else "default"
+        if self.skin == "default":
+            self.base_dir = assets / self.dir
+        else:
+            self.base_dir = SKINS_DIR / self.skin
         self.pad = max(4, len(str(self.frames)))
-        self.paths = [assets / self.dir / f"f{i + 1:0{self.pad}d}.webp" for i in range(self.frames)]
+        self.paths = [self.base_dir / f"f{i + 1:0{self.pad}d}.webp" for i in range(self.frames)]
         st = meta["window"]["store"]
         # 三个动作使用相同内容原点,上下透明边距只给全身拉长留空间。
         self.src_w = max(1, int(st["w"]))     # 帧文件原始像素(用于坐标换算)
@@ -522,11 +529,18 @@ class Clip:
 
 
 class PetApp:
-    def __init__(self, group=None, scale=None) -> None:
+    def __init__(self, group=None, scale=None, skin="default") -> None:
         self.group = group
-        if not MANIFEST.exists():
-            raise SystemExit(f"找不到素材清单: {MANIFEST}")
-        m = group.manifest if group is not None else json.loads(MANIFEST.read_text(encoding="utf-8"))
+        self.skin = skin if skin in SKIN_CHOICES else "default"
+        if self.skin == "default":
+            if not MANIFEST.exists():
+                raise SystemExit(f"找不到素材清单: {MANIFEST}")
+            m = group.manifest if group is not None else json.loads(MANIFEST.read_text(encoding="utf-8"))
+        else:
+            skin_manifest = SKINS_DIR / self.skin / "manifest.json"
+            if not skin_manifest.exists():
+                raise SystemExit(f"找不到皮肤清单: {skin_manifest}")
+            m = json.loads(skin_manifest.read_text(encoding="utf-8"))
         self.manifest = m
         self.assets = ROOT / "assets"
         self.settings = group.settings if group is not None else load_settings()
@@ -557,7 +571,7 @@ class PetApp:
             self.group = PetGroup(m, self.settings, AudioPlayer(), FRAME_CACHE_BYTES)
         self.audio = PetVoice(self.group, self)
         # The active clips drive the menu, focused keys, and automatic performances.
-        self.clips = {c["id"]: Clip(c, self.assets, self.global_scale)
+        self.clips = {c["id"]: Clip(c, self.assets, self.global_scale, self.skin)
                       for c in m["clips"] if c["id"] == "laugh"}
         self.order = list(self.clips)
         self.idle_clip = m.get("idleClip") or self.order[0]
@@ -857,7 +871,12 @@ class PetApp:
         self._eye_next_frame = 0.0
         try:
             clip = self.clips[self.idle_clip]
-            self._eyes = self.group.eyes((clip.fw, clip.fh))
+            if getattr(self, "skin", "default") == "default":
+                self._eyes = self.group.eyes((clip.fw, clip.fh))
+            else:
+                cfg = self.manifest.get("eyeShift")
+                if cfg:
+                    self._eyes = EyeShift((clip.fw, clip.fh), cfg["box"], cfg.get("limit", 1.8))
             self._idle_rgba = self._read_rgba(self.idle_clip, self.idle_frame)
         except Exception as error:
             log(f"眼部素材不可用,使用原待机图: {error}")
@@ -883,7 +902,7 @@ class PetApp:
         clip = self.clips[clip_id]
         index = max(0, min(index, clip.frames - 1))
         group = getattr(self, "group", None)
-        key = ("rgba", clip_id, index, clip.fw, clip.fh)
+        key = ("rgba", getattr(self, "skin", "default"), clip_id, index, clip.fw, clip.fh)
         if group is not None:
             hit = group.cache.get(key)
             if hit is not None:
@@ -907,7 +926,7 @@ class PetApp:
         """取一帧的 PhotoImage(按显示尺寸缓存,LRU 淘汰)。"""
         clip = self.clips[clip_id]
         index = max(0, min(index, clip.frames - 1))
-        key = ("photo", clip_id, index, clip.fw, clip.fh)
+        key = ("photo", getattr(self, "skin", "default"), clip_id, index, clip.fw, clip.fh)
         hit = self.group.cache.get(key)
         if hit is not None:
             return hit
